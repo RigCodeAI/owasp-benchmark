@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Run environment evidence",
+  "type": "object",
+  "required": ["captured_at", "platform", "os", "architecture", "python_version"],
+  "properties": {
+    "captured_at": {"type": "string", "format": "date-time"},
+    "platform": {"type": "string", "minLength": 1},
+    "os": {"type": "string", "minLength": 1},
+    "architecture": {"type": "string", "minLength": 1},
+    "python_version": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

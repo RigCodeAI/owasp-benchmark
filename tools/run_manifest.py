@@ -233,10 +233,6 @@ def create_manifest(
                     config["sha256"] = sha256_file(config_path_obj)
             else:
                 config["path"] = str(config_path)
-    artifact_items = []
-    for relative in _relative_files(directory):
-        path = directory / relative
-        artifact_items.append({"path": relative.as_posix(), "sha256": sha256_file(path), "bytes": path.stat().st_size})
     environment = {
         "captured_at": utc_now(),
         "platform": platform.platform(),
@@ -244,6 +240,15 @@ def create_manifest(
         "architecture": platform.machine(),
         "python_version": platform.python_version(),
     }
+    # Keep environment evidence standalone and write it before enumerating
+    # artifacts. It intentionally contains no checksum fields, so including
+    # it in both the artifact list and SHA256SUMS cannot create a cycle.
+    environment_path = directory / "environment.json"
+    environment_path.write_text(json.dumps(environment, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    artifact_items = []
+    for relative in _relative_files(directory):
+        path = directory / relative
+        artifact_items.append({"path": relative.as_posix(), "sha256": sha256_file(path), "bytes": path.stat().st_size})
     manifest = {
         "schema_version": 1,
         "run_id": run_id,
@@ -281,6 +286,17 @@ def validate_run(directory: Path, schema_dir: Path = SCHEMAS) -> list[str]:
     errors.extend(verify_checksums(directory))
     errors.extend(_validate_configuration(directory, manifest.get("configuration")))
     errors.extend(_check_public_fields(manifest))
+    environment_path = directory / "environment.json"
+    if not environment_path.is_file():
+        errors.append("run missing environment.json")
+    else:
+        try:
+            environment_value = validate_file(environment_path, schema_dir / "environment.schema.json")
+            if environment_value != manifest.get("environment"):
+                errors.append("environment.json does not exactly match manifest environment")
+            errors.extend(_check_public_fields(environment_value, "$.environment.json"))
+        except (SchemaError, OSError) as exc:
+            errors.append(f"environment.json: {exc}")
     listed = {item.get("path") for item in manifest.get("artifacts", []) if isinstance(item, dict)}
     actual = {
         path.relative_to(directory).as_posix()

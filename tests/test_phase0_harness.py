@@ -260,9 +260,37 @@ class Phase0HarnessTests(unittest.TestCase):
             )
             self.assertEqual(validate_run(artifacts), [])
             manifest_value = json.loads((artifacts / "manifest.json").read_text(encoding="utf-8"))
+            environment_path = artifacts / "environment.json"
+            self.assertTrue(environment_path.is_file())
+            environment_value = json.loads(environment_path.read_text(encoding="utf-8"))
+            self.assertEqual(environment_value, manifest_value["environment"])
+            checksums = (artifacts / "SHA256SUMS").read_text(encoding="utf-8")
+            self.assertIn("  environment.json\n", checksums)
             self.assertEqual(manifest_value["configuration"]["path"], "external:frozen-rules.yml")
             self.assertEqual(manifest_value["configuration"]["sha256"], rules_digest)
             self.assertNotIn("frozen-rules.yml", (artifacts / "SHA256SUMS").read_text(encoding="utf-8"))
+            environment_value["architecture"] = "tampered"
+            environment_path.write_text(json.dumps(environment_value), encoding="utf-8")
+            self.assertTrue(validate_run(artifacts))
+            # Recreate the manifest to refresh the standalone environment and
+            # checksum evidence, then prove omission is rejected as well.
+            create_manifest(
+                artifacts,
+                run_id="run-1",
+                tool="test",
+                method="sast",
+                benchmark_commit=SHA,
+                harness_commit=SHA,
+                command=["test --source-scope <scope>"],
+                status="PASS",
+                exit_code=0,
+                started_at="2026-09-16T00:00:00Z",
+                tool_version="test 1",
+                config={"path": str(rules), "sha256": "0" * 64, "evidence_path": "semgrep-provenance.json"},
+                source_scope=json.loads((scope / "source-scope.json").read_text()),
+            )
+            environment_path.unlink()
+            self.assertTrue(validate_run(artifacts))
             (artifacts / "raw.sarif").write_text("tampered\n", encoding="utf-8")
             self.assertTrue(validate_run(artifacts))
             verify = subprocess.run(
