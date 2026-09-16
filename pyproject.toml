@@ -1,5 +1,5 @@
 [project]
-name = "owasp-benchmarkpython-scanners"
+name = "owasp-benchmark"
 version = "0.1.0"
 description = "Neutral, reproducible scanner comparison on OWASP BenchmarkPython"
 requires-python = ">=3.11"

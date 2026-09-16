@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/adampatarino/owasp-benchmarkpython-scanners/schemas/finding.schema.json",
+  "$id": "https://github.com/RigCodeAI/owasp-benchmark/schemas/finding.schema.json",
   "title": "Normalized scanner finding",
   "type": "object",
   "required": ["schema_version", "case_id", "cwes", "tool", "rule_id", "message", "raw_ref"],

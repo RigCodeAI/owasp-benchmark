@@ -95,7 +95,7 @@ def replay(
         url = target_url(case["source_url"], base_url, case["query"])
         body = urllib.parse.urlencode(case["form"]).encode() if case["method"] == "POST" else None
         headers = {str(key): str(value) for key, value in case["headers"].items()}
-        headers["User-Agent"] = "owasp-benchmarkpython-scanners/1"
+        headers["User-Agent"] = "owasp-benchmark/1"
         if case["cookies"]:
             headers["Cookie"] = "; ".join(
                 f"{key}={urllib.parse.quote_plus(value).replace('+', '%20')}"
@@ -208,7 +208,7 @@ def build_har(cases: list[dict], base_url: str, allow_remote: bool = False) -> d
     return {
         "log": {
             "version": "1.2",
-            "creator": {"name": "owasp-benchmarkpython-scanners", "version": "1"},
+            "creator": {"name": "owasp-benchmark", "version": "1"},
             "entries": entries,
         }
     }
