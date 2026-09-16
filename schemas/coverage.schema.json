@@ -2,9 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Runtime request coverage",
   "type": "object",
-  "required": ["schema_version", "total", "exercised", "not_run", "cases"],
+  "required": ["schema_version", "base_url", "planned", "executed", "failed", "total", "exercised", "not_run", "coverage_rate", "cases"],
   "properties": {
     "schema_version": {"const": 1},
+    "base_url": {"type": "string", "minLength": 1},
+    "planned": {"type": "integer", "minimum": 0},
+    "executed": {"type": "integer", "minimum": 0},
+    "failed": {"type": "integer", "minimum": 0},
     "total": {"type": "integer", "minimum": 0},
     "exercised": {"type": "integer", "minimum": 0},
     "not_run": {"type": "integer", "minimum": 0},
@@ -13,10 +17,17 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["case_id", "exercised"],
+          "required": ["case_id", "method", "url", "input_names", "status", "reached_target", "exercised", "error", "elapsed_ms"],
         "properties": {
           "case_id": {"type": "string", "pattern": "^BenchmarkTest[0-9]{5}$"},
           "exercised": {"type": "boolean"},
+          "method": {"enum": ["GET", "POST"]},
+          "url": {"type": ["string", "null"]},
+          "input_names": {"type": "array", "items": {"type": "string"}},
+          "error": {"type": ["string", "null"]},
+          "predeclared_reason": {"type": ["string", "null"]},
+          "not_run_reason": {"type": ["string", "null"]},
+          "elapsed_ms": {"type": "number", "minimum": 0},
           "reached_target": {"type": "boolean"},
           "status": {"type": ["integer", "null"]}
         }

@@ -50,10 +50,9 @@ BenchmarkPython already includes two useful inputs:
 
 1. start BenchmarkPython in an isolated network;
 2. start ZAP as a proxy/daemon;
-3. replay all 1,230 safe seed requests through ZAP;
-4. import the pinned OpenAPI document;
-5. run ZAP active scanning over the recorded endpoints;
-6. export SARIF/JSON plus per-case traffic coverage.
+3. replay all 1,230 safe seed requests exactly once through ZAP;
+4. wait for passive scanning, then run ZAP active scanning over the recorded endpoints;
+5. export SARIF/JSON plus per-case traffic and history-boundary evidence.
 
 The same safe replay can later drive Rig. A safe case that was never exercised is `not_run`, never a true negative.
 
@@ -96,9 +95,22 @@ python3 tools/traffic.py har \
 zap.sh -cmd -autocheck configs/zap-automation.example.yaml
 ```
 
-Here `benchmark` is an isolated container-network service name, which is why the explicit remote-host override is present. The HAR import sends the safe seed requests; ZAP's `activeScan` job supplies attack payloads. The OpenAPI file remains a useful endpoint cross-check, but it is not the canonical traffic source because it does not retain every concrete safe parameter name and value.
+Here `benchmark` is an isolated container-network service name, which is why the explicit remote-host override is present. The checked-in runner replays the crawler requests directly through the private proxy exactly once; do not import this HAR in the same session. ZAP's `activeScan` job supplies attack payloads. The OpenAPI file remains a useful endpoint cross-check, but it is not the canonical traffic source because it does not retain every concrete safe parameter name and value.
 
 The vendor runner scripts under `scripts/run/` are transparent starting points, not published results. Read each command, pin its mutable rules or query packs, and write artifacts outside the target tree before a release run.
+
+## Phase 0 harness checks
+
+Each scanner runner records a schema-validated `manifest.json` and `SHA256SUMS`, including failed environment and scan attempts. SAST runners scan a copied, hashed source scope made by `tools/source_scope.py`; generated reports, VCS state, virtual environments, and scanner scripts are excluded. Semgrep publication runs require a read-only local rules file and manifest from `tools/freeze_semgrep.py`.
+
+The private ZAP topology is described by [`configs/zap-compose.example.yml`](configs/zap-compose.example.yml) and managed with `scripts/zap-topology.sh prepare|up|down`. `prepare` recreates the scoped named volumes and initializes their ownership before any ZAP preflight; `up` then starts the prepared topology, and `down` cleans it up. It publishes no host port, uses an internal network and resource limits, and requires an immutable image digest. The ZAP runner replays crawler traffic once through the proxy, requires history and active-scan evidence, and exports both native JSON and SARIF.
+
+Run the complete harness-only checks with:
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 tools/verify_harness.py
+```
 
 ## Publication policy
 

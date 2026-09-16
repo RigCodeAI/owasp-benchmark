@@ -1,0 +1,74 @@
+# Private, one-URL topology for the BenchmarkPython/ZAP runner.
+# No service publishes a host port. Set ZAP_IMAGE_DIGEST to the release-locked
+# digest before starting; an image tag alone is not a publication input.
+services:
+  benchmark:
+    platform: linux/arm64
+    image: ${BENCHMARK_IMAGE:?set BENCHMARK_IMAGE built from the pinned benchmark commit}
+    command: ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "app:app"]
+    expose:
+      - "8000"
+    environment:
+      FLASK_DEBUG: "0"
+      PYTHONUNBUFFERED: "1"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - benchmark_testfiles:/app/testfiles:rw
+    networks:
+      benchmark_private:
+        aliases: [benchmark]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; response=urllib.request.urlopen('http://127.0.0.1:8000/benchmark/Index.html', timeout=2); assert response.status == 200"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  zap:
+    platform: linux/arm64
+    image: ${ZAP_IMAGE:-ghcr.io/zaproxy/zaproxy:2.17.0}@${ZAP_IMAGE_DIGEST:?set immutable ZAP_IMAGE_DIGEST}
+    user: "1000:1000"
+    command: ["zap.sh", "-daemon", "-host", "0.0.0.0", "-port", "8080", "-config", "api.disablekey=true"]
+    expose:
+      - "8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+    volumes:
+      - ${TRAFFIC_TOOL_PATH:?set exact traffic.py path}:/opt/harness/traffic.py:ro
+      - ${CRAWLER_XML_PATH:?set exact crawler XML path}:/opt/harness/benchmark-crawler-http.xml:ro
+      - ${ZAP_PLAN_PATH:?set exact Automation plan path}:/zap/wrk/zap-plan.yaml:ro
+      - zap_artifacts:/zap/wrk/artifacts:rw
+      - zap_state:/home/zap/.ZAP:rw
+      - zap_java:/home/zap/.java:rw
+    mem_limit: 1g
+    cpus: 2.0
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      benchmark:
+        condition: service_healthy
+    networks:
+      benchmark_private:
+        aliases: [zap]
+
+networks:
+  benchmark_private:
+    internal: true
+
+volumes:
+  benchmark_testfiles:
+  zap_artifacts:
+  zap_state:
+  zap_java:

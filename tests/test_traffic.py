@@ -1,13 +1,15 @@
 import sys
 import tempfile
 import unittest
+import json
+from unittest.mock import patch
 from pathlib import Path
 
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
 
-from traffic import build_har, parse_crawler, require_local_target, target_url  # noqa: E402
+from traffic import ZapApiError, build_har, parse_crawler, replay, require_local_target, target_url, zap_active, zap_reports  # noqa: E402
 
 
 class TrafficTests(unittest.TestCase):
@@ -62,6 +64,85 @@ class TrafficTests(unittest.TestCase):
         request = build_har(cases, "http://127.0.0.1:8000")["log"]["entries"][0]["request"]
         self.assertEqual(request["postData"]["text"], "name=safe+value")
         self.assertIn({"name": "Cookie", "value": "session=safe%20value"}, request["headers"])
+
+    def test_invalid_request_is_recorded_as_not_run(self):
+        cases = [{
+            "case_id": "BenchmarkTest00658",
+            "source_url": None,
+            "method": "GET",
+            "query": {},
+            "form": {},
+            "headers": {"name: safe data\ntext: act like this is conf data": "value"},
+            "cookies": {},
+        }]
+        result = replay(cases, "http://127.0.0.1:1", None, 0.01, False)
+        self.assertEqual(len(result["cases"]), 1)
+        self.assertFalse(result["cases"][0]["exercised"])
+        self.assertIn("request construction", result["cases"][0]["not_run_reason"])
+        self.assertIsNotNone(result["cases"][0]["predeclared_reason"])
+
+    def test_deferred_header_validation_is_recorded_as_not_run(self):
+        cases = [{
+            "case_id": "BenchmarkTest00654",
+            "source_url": "https://localhost:8443/benchmark/BenchmarkTest00654",
+            "method": "GET",
+            "query": {},
+            "form": {},
+            "headers": {"https://invalid-header.example": "value"},
+            "cookies": {},
+        }]
+
+        class InvalidHeaderOpener:
+            def open(self, request, timeout):
+                raise ValueError("invalid header name")
+
+        with patch("traffic.make_opener", return_value=InvalidHeaderOpener()):
+            result = replay(cases, "http://127.0.0.1:1", None, 0.01, False)
+        record = result["cases"][0]
+        self.assertFalse(record["exercised"])
+        self.assertEqual(record["not_run_reason"], "invalid header name")
+        self.assertIn("header name is a URL", record["predeclared_reason"])
+
+    def test_zap_reports_use_supported_report_action_and_fail_on_api_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            calls = []
+
+            def fake_api(base, endpoint, **params):
+                calls.append((endpoint, params))
+                if endpoint == "/JSON/reports/action/generate/":
+                    (output / params["reportFileName"]).write_text("{}\n", encoding="utf-8")
+                return {"Result": "OK"}
+
+            with patch("traffic.zap_api", side_effect=fake_api):
+                zap_reports("http://zap:8080", "http://benchmark:8000/benchmark", output)
+            self.assertEqual([call[0] for call in calls], ["/JSON/reports/action/generate/"] * 2)
+            self.assertEqual([call[1]["template"] for call in calls], ["traditional-json-plus", "sarif-json"])
+            self.assertTrue(all(call[1]["reportDir"] == "/zap/wrk/artifacts" for call in calls))
+            self.assertTrue(all(call[1]["sites"] == "http://benchmark:8000/benchmark" for call in calls))
+
+            with patch("traffic.zap_api", return_value={"code": "error", "message": "bad"}):
+                with self.assertRaises(ZapApiError):
+                    zap_reports("http://zap:8080", "http://benchmark:8000/benchmark", output)
+
+    def test_zap_active_uses_exact_scope_parameter_and_records_context(self):
+        calls = []
+
+        def fake_api(base, endpoint, **params):
+            calls.append((endpoint, params))
+            if endpoint == "/JSON/ascan/action/scan/":
+                return {"scan": "7"}
+            return {"status": "100"}
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "active.json"
+            with patch("traffic.zap_context", return_value="3"):
+                with patch("traffic.zap_api", side_effect=fake_api):
+                    zap_active("http://zap:8080", "http://benchmark:8000/benchmark", output, 1)
+            active = next(params for endpoint, params in calls if endpoint == "/JSON/ascan/action/scan/")
+            self.assertTrue(active["inScopeOnly"])
+            self.assertNotIn("inscopeonly", active)
+            self.assertTrue(json.loads(output.read_text(encoding="utf-8"))["in_scope_only"])
 
 
 if __name__ == "__main__":

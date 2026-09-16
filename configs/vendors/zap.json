@@ -5,5 +5,10 @@
   "enabled": true,
   "seed_traffic": "data/benchmark-crawler-http.xml",
   "api_definition": "data/openapi.yaml",
-  "requires_authentication": false
+  "requires_authentication": false,
+  "requires_pinned_image_digest": true,
+  "seed_traffic_exactly_once": true,
+  "outputs": ["traditional-json", "sarif", "coverage", "history-boundary"],
+  "image_digest": "sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef",
+  "arm64_child_digest": "sha256:05cbf4cab5d2fdaef55b0cd0b586f22d0ce4f75e0995f3cea2db23afbbdfd2f8"
 }

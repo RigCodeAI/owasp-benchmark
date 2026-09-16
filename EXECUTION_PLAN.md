@@ -235,14 +235,16 @@ Snyk exit code `1` means findings were reported and is accepted by the runner. O
 
 - Download a pinned official CodeQL bundle. Initial candidate: `2.27.0`.
 - Verify the release checksum before extraction.
-- Record `codeql version --format=json` and `codeql resolve qlpacks`.
+- Record `codeql version --format=json` and `codeql resolve packs`.
 - Use the bundle's pinned Python query pack and record the exact suite. The baseline suite is `python-security-extended.qls` unless the protocol freeze changes it before any scanner run.
 
 ### Canary and runs
 
 ```sh
 PATH=/absolute/path/to/codeql:$PATH \
-CODEQL_SUITE=codeql/python-queries:codeql-suites/python-security-extended.qls \
+CODEQL_BUNDLE_PATH=/absolute/path/to/codeql-bundle \
+CODEQL_QUERY_PACK_PATH=/absolute/path/to/codeql-bundle/qlpacks/codeql/python-queries/1.8.10 \
+CODEQL_SUITE=/absolute/path/to/codeql-bundle/qlpacks/codeql/python-queries/1.8.10/codeql-suites/python-security-extended.qls \
   ./scripts/run/codeql.sh benchmark /absolute/path/to/run-1
 ```
 

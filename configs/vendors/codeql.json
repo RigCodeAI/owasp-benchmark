@@ -3,6 +3,14 @@
   "name": "CodeQL",
   "method": "sast",
   "enabled": true,
-  "command_template": "codeql database create <db> --language=python --source-root=<target> && codeql database analyze <db> <pinned-suite> --format=sarifv2.1.0 --output=<artifact>",
-  "requires_authentication": false
+  "command_template": "CODEQL_BUNDLE_PATH=<bundle-root> codeql database create <db> --language=python --source-root=<target/tree> && codeql database analyze <db> <pinned-suite> --format=sarifv2.1.0 --output=<artifact>",
+  "requires_authentication": false,
+  "cli_version": "2.27.0",
+  "requires_bundle_query_pack_and_suite_hashes": true,
+  "bundle_release": "2.27.0",
+  "bundle_archive_sha256": "84e5f9d804ae58c41930c33cd61cbeffdbca86689fc85f2f89a2ab0eec433bd6",
+  "query_pack": "codeql/python-queries",
+  "query_pack_version": "1.8.10",
+  "suite": "python-security-extended.qls",
+  "resolve_command": "codeql resolve packs"
 }
