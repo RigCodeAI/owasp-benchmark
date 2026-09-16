@@ -114,6 +114,8 @@ The vendor runner scripts under `scripts/run/` are transparent starting points, 
 
 See [`METHODOLOGY.md`](METHODOLOGY.md) for the full protocol.
 
+See [`EXECUTION_PLAN.md`](EXECUTION_PLAN.md) for the coordinator and subagent runbook covering setup, three-run execution, independent review, and publication.
+
 ## Safety
 
 BenchmarkPython is intentionally vulnerable. Run it only in an isolated environment bound to loopback or a private container network. Never point these scripts at a non-benchmark target.
