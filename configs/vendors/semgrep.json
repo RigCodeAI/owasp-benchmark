@@ -1,0 +1,8 @@
+{
+  "id": "semgrep",
+  "name": "Semgrep",
+  "method": "sast",
+  "enabled": true,
+  "command_template": "semgrep scan --config <pinned-rules> --sarif --output <artifact> <target>",
+  "requires_authentication": false
+}

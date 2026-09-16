@@ -1,0 +1,8 @@
+{
+  "id": "snyk-code",
+  "name": "Snyk Code",
+  "method": "sast",
+  "enabled": true,
+  "command_template": "snyk code test <target> --sarif-file-output=<artifact>",
+  "requires_authentication": true
+}

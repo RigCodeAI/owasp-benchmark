@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Scanner run manifest",
+  "type": "object",
+  "required": ["schema_version", "run_id", "tool", "method", "started_at", "benchmark_commit", "command", "artifacts"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run_id": {"type": "string"},
+    "tool": {"type": "string"},
+    "method": {"enum": ["sast", "dast", "iast"]},
+    "started_at": {"type": "string", "format": "date-time"},
+    "benchmark_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "command": {"type": "array", "items": {"type": "string"}},
+    "artifacts": {"type": "array", "items": {"type": "object"}}
+  }
+}

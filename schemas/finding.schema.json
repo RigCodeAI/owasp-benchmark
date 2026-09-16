@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/adampatarino/owasp-benchmarkpython-scanners/schemas/finding.schema.json",
+  "title": "Normalized scanner finding",
+  "type": "object",
+  "required": ["schema_version", "case_id", "cwes", "tool", "rule_id", "message", "raw_ref"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": ["string", "null"], "pattern": "^BenchmarkTest[0-9]{5}$"},
+    "cwes": {"type": "array", "items": {"type": "string", "pattern": "^CWE-[0-9]+$"}, "uniqueItems": true},
+    "tool": {"type": "string"},
+    "rule_id": {"type": ["string", "null"]},
+    "rule_name": {"type": ["string", "null"]},
+    "level": {"type": ["string", "null"]},
+    "file_or_url": {"type": ["string", "null"]},
+    "line": {"type": ["integer", "null"], "minimum": 1},
+    "message": {"type": "string"},
+    "raw_ref": {"type": "string"}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Benchmark score",
+  "type": "object",
+  "required": ["schema_version", "matching_policy", "all_cases", "diagnostics"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "matching_policy": {"type": "string"},
+    "all_cases": {"$ref": "#/$defs/metrics"},
+    "covered_cases": {"$ref": "#/$defs/metrics"},
+    "coverage": {"type": "object"},
+    "diagnostics": {"type": "object"}
+  },
+  "$defs": {
+    "metrics": {
+      "type": "object",
+      "required": ["cases", "vulnerable", "safe", "tp", "fn", "fp", "tn", "recall", "false_positive_rate", "by_cwe"],
+      "properties": {
+        "cases": {"type": "integer", "minimum": 0},
+        "vulnerable": {"type": "integer", "minimum": 0},
+        "safe": {"type": "integer", "minimum": 0},
+        "tp": {"type": "integer", "minimum": 0},
+        "fn": {"type": "integer", "minimum": 0},
+        "fp": {"type": "integer", "minimum": 0},
+        "tn": {"type": "integer", "minimum": 0},
+        "recall": {"type": ["number", "null"]},
+        "false_positive_rate": {"type": ["number", "null"]},
+        "by_cwe": {"type": "object"}
+      }
+    }
+  }
+}

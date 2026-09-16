@@ -1,0 +1,9 @@
+{
+  "id": "owasp-zap",
+  "name": "OWASP ZAP",
+  "method": "dast",
+  "enabled": true,
+  "seed_traffic": "data/benchmark-crawler-http.xml",
+  "api_definition": "data/openapi.yaml",
+  "requires_authentication": false
+}

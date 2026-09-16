@@ -1,0 +1,6 @@
+OWASP BenchmarkPython Scanner Comparison
+Copyright 2026 The project contributors
+
+This repository fetches OWASP BenchmarkPython separately. BenchmarkPython is
+licensed under GPL-3.0 by its respective contributors. Scanner products, rule
+packs, query packs, and reports remain subject to their own licenses and terms.

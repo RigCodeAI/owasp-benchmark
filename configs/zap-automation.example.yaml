@@ -1,0 +1,37 @@
+# Generate artifacts/benchmark-safe.har with tools/traffic.py first.
+# Keep this URL identical to the --base-url used for the HAR.
+env:
+  contexts:
+    - name: benchmark
+      urls:
+        - http://benchmark:8000/benchmark
+
+jobs:
+  - type: import
+    parameters:
+      type: har
+      fileName: /zap/wrk/artifacts/benchmark-safe.har
+      sendRequests: true
+      maxMessages: 0
+
+  - type: passiveScan-wait
+
+  - type: activeScan
+    parameters:
+      context: benchmark
+      url: http://benchmark:8000/benchmark
+      policy: Default Policy
+
+  - type: report
+    parameters:
+      template: traditional-json-plus
+      reportDir: /zap/wrk/artifacts
+      reportFile: zap-report.json
+      displayReport: false
+
+  - type: report
+    parameters:
+      template: sarif-json
+      reportDir: /zap/wrk/artifacts
+      reportFile: raw.sarif
+      displayReport: false

@@ -1,0 +1,8 @@
+{
+  "id": "rig",
+  "name": "Rig",
+  "method": "iast",
+  "enabled": false,
+  "status": "runner contract not ready",
+  "output": ["native-json", "sarif"]
+}

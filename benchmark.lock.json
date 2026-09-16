@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
+  "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba",
+  "version": "0.1",
+  "counts": {
+    "cases": 1230,
+    "vulnerable": 452,
+    "safe": 778,
+    "cwes": 14
+  },
+  "artifacts": {
+    "expected_results": {
+      "path": "expectedresults-0.1.csv",
+      "sha256": "6396f37c97cfd0c018db3d8750095ce6c678a083f83620cfb3e88fe27a46bb0c"
+    },
+    "openapi": {
+      "path": "data/openapi.yaml",
+      "sha256": "e9daadc22de965f7f793d73bbab87cf78f284cb29a0c2c9e1d738433174e8a03"
+    },
+    "crawler": {
+      "path": "data/benchmark-crawler-http.xml",
+      "sha256": "598c9506b29a47967fd93ad5e64dbbd635a41a8894385e5f8baa3965323eed97"
+    }
+  }
+}

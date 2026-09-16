@@ -1,0 +1,8 @@
+{
+  "id": "codeql",
+  "name": "CodeQL",
+  "method": "sast",
+  "enabled": true,
+  "command_template": "codeql database create <db> --language=python --source-root=<target> && codeql database analyze <db> <pinned-suite> --format=sarifv2.1.0 --output=<artifact>",
+  "requires_authentication": false
+}

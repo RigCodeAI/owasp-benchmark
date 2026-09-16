@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Runtime request coverage",
+  "type": "object",
+  "required": ["schema_version", "total", "exercised", "not_run", "cases"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "total": {"type": "integer", "minimum": 0},
+    "exercised": {"type": "integer", "minimum": 0},
+    "not_run": {"type": "integer", "minimum": 0},
+    "coverage_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["case_id", "exercised"],
+        "properties": {
+          "case_id": {"type": "string", "pattern": "^BenchmarkTest[0-9]{5}$"},
+          "exercised": {"type": "boolean"},
+          "reached_target": {"type": "boolean"},
+          "status": {"type": ["integer", "null"]}
+        }
+      }
+    }
+  }
+}
