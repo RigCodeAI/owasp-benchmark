@@ -74,6 +74,10 @@ def main() -> int:
         errors.append("ZAP topology must be private and publish no host ports")
     if topology.count("platform: linux/arm64") != 2:
         errors.append("both benchmark and ZAP Compose services must be pinned to linux/arm64")
+    if "${ZAP_PLATFORM_DIGEST:?set immutable ZAP_PLATFORM_DIGEST}" not in topology:
+        errors.append("Compose must execute ZAP by the frozen linux/arm64 child digest")
+    if "@${ZAP_IMAGE_DIGEST" in topology:
+        errors.append("Compose must not execute ZAP by the multi-architecture index digest")
     if "mem_limit:" not in topology or "cpus:" not in topology or "pids_limit:" not in topology:
         errors.append("ZAP topology is missing resource limits")
     if "app:app" not in topology or "FLASK_DEBUG: \"0\"" not in topology:
@@ -109,7 +113,7 @@ def main() -> int:
             errors.append(f"{runner} does not initialize topology ownership before preflight")
         elif runner_text.find(prepare_marker) > runner_text.find("$compose run"):
             errors.append(f"{runner} runs a Compose preflight before topology preparation")
-    for marker in ("run --rm --no-deps", "--user 0:0", "--cap-drop ALL", "--cap-add CHOWN", "chown -R 1000:1000 /zap/wrk/artifacts /home/zap/.ZAP /home/zap/.java"):
+    for marker in ("run --rm --no-deps", "--user 0:0", "--cap-drop ALL", "--cap-add CHOWN", "chown -R 1000:1000 /zap/wrk/artifacts /home/zap/.ZAP /home/zap/.java", "ZAP_PLATFORM_DIGEST"):
         if marker not in topology_script:
             errors.append(f"topology startup lacks constrained writable-volume initialization: {marker}")
     export_script = ROOT / "scripts" / "zap-export-artifacts.sh"
@@ -143,6 +147,9 @@ def main() -> int:
         "zap-export-artifacts.sh",
         "docker build --platform linux/arm64",
         "docker run --rm --platform linux/arm64",
+        "docker pull \"$zap_image@$zap_platform_digest\"",
+        "\"$zap_image@$zap_platform_digest\" zap.sh -version",
+        "ZAP_PLATFORM_DIGEST=\"$zap_platform_digest\"",
     ):
         if marker not in integration:
             errors.append(f"ZAP integration check lacks {marker}")

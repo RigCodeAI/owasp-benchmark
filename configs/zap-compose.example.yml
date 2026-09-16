@@ -1,6 +1,7 @@
 # Private, one-URL topology for the BenchmarkPython/ZAP runner.
-# No service publishes a host port. Set ZAP_IMAGE_DIGEST to the release-locked
-# digest before starting; an image tag alone is not a publication input.
+# No service publishes a host port. Set ZAP_PLATFORM_DIGEST to the release-
+# locked linux/arm64 child digest before starting; an image tag alone is not a
+# publication input. The index digest remains in release provenance.
 services:
   benchmark:
     platform: linux/arm64
@@ -34,7 +35,7 @@ services:
 
   zap:
     platform: linux/arm64
-    image: ${ZAP_IMAGE:-ghcr.io/zaproxy/zaproxy:2.17.0}@${ZAP_IMAGE_DIGEST:?set immutable ZAP_IMAGE_DIGEST}
+    image: ${ZAP_IMAGE:-ghcr.io/zaproxy/zaproxy:2.17.0}@${ZAP_PLATFORM_DIGEST:?set immutable ZAP_PLATFORM_DIGEST}
     user: "1000:1000"
     command: ["zap.sh", "-daemon", "-host", "0.0.0.0", "-port", "8080", "-config", "api.disablekey=true"]
     expose:

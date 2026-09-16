@@ -21,6 +21,7 @@ fi
 require_runtime_inputs() {
   : "${BENCHMARK_IMAGE:?set BENCHMARK_IMAGE for the pinned BenchmarkPython image}"
   : "${ZAP_IMAGE_DIGEST:?set immutable ZAP_IMAGE_DIGEST}"
+  : "${ZAP_PLATFORM_DIGEST:?set immutable arm64 ZAP_PLATFORM_DIGEST}"
   : "${TRAFFIC_TOOL_PATH:?set exact traffic.py path}"
   : "${CRAWLER_XML_PATH:?set exact crawler XML path}"
   : "${ZAP_PLAN_PATH:?set exact Automation plan path}"

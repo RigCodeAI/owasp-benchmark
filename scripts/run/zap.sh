@@ -79,7 +79,7 @@ export CRAWLER_XML_PATH="$benchmark/data/benchmark-crawler-http.xml"
 export ZAP_PLAN_PATH="$plan"
 export ZAP_ARTIFACT_DIR="$artifacts"
 export BENCHMARK_IMAGE=${BENCHMARK_IMAGE:?set image built from benchmark.lock.json}
-export ZAP_IMAGE="$image" ZAP_IMAGE_DIGEST="$image_digest"
+export ZAP_IMAGE="$image" ZAP_IMAGE_DIGEST="$image_digest" ZAP_PLATFORM_DIGEST="$platform_digest"
 if ! "$repo_root/scripts/zap-topology.sh" prepare >"$artifacts/topology-prepare.stdout.log" 2>"$artifacts/topology-prepare.stderr.log"; then finish; exit 1; fi
 if ! $compose run --rm --no-deps zap zap.sh -cmd -autocheck /zap/wrk/zap-plan.yaml >"$artifacts/plan-image-validation.stdout.log" 2>"$artifacts/plan-image-validation.stderr.log"; then finish; exit 1; fi
 if ! "$repo_root/scripts/zap-topology.sh" up >"$artifacts/topology.stdout.log" 2>"$artifacts/topology.stderr.log"; then finish; exit 1; fi

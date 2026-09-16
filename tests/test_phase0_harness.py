@@ -294,6 +294,22 @@ class Phase0HarnessTests(unittest.TestCase):
             history.write_text(history.read_text().replace("2", "1"), encoding="utf-8")
             self.assertTrue(validate_history(history, 2))
 
+    def test_zap_execution_binds_arm64_child_digest_and_retains_index_provenance(self):
+        root = Path(__file__).resolve().parents[1]
+        compose = (root / "configs" / "zap-compose.example.yml").read_text(encoding="utf-8")
+        integration = (root / "scripts" / "verify-zap-integration.sh").read_text(encoding="utf-8")
+        topology = (root / "scripts" / "zap-topology.sh").read_text(encoding="utf-8")
+        child = "sha256:05cbf4cab5d2fdaef55b0cd0b586f22d0ce4f75e0995f3cea2db23afbbdfd2f8"
+        index = "sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef"
+        self.assertIn("platform: linux/arm64", compose)
+        self.assertIn("@${ZAP_PLATFORM_DIGEST:?set immutable ZAP_PLATFORM_DIGEST}", compose)
+        self.assertNotIn("@${ZAP_IMAGE_DIGEST", compose)
+        self.assertIn(child, integration)
+        self.assertIn(index, integration)
+        self.assertIn('docker pull "$zap_image@$zap_platform_digest"', integration)
+        self.assertIn('"$zap_image@$zap_platform_digest" zap.sh -version', integration)
+        self.assertIn('ZAP_PLATFORM_DIGEST:?set immutable arm64 ZAP_PLATFORM_DIGEST', topology)
+
     def test_zap_seed_boundary_requires_complete_nonempty_history(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
