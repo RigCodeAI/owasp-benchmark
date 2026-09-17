@@ -19,6 +19,7 @@ from schema import SchemaError, load_schema, validate, validate_file
 from validate_sarif import SarifError, validate_file as validate_sarif_file
 from source_scope import verify as verify_source_scope
 from zap_automation import validate_history, validate_coverage
+from snyk_provenance import validate as validate_snyk_provenance, validate_artifacts as validate_snyk_artifacts
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -322,6 +323,20 @@ def validate_run(directory: Path, schema_dir: Path = SCHEMAS) -> list[str]:
         if Path(item["path"]).is_absolute() or ".." in Path(item["path"]).parts:
             errors.append(f"manifest artifact path is unsafe: {item['path']}")
     status = manifest.get("status")
+    if str(manifest.get("tool", "")).lower() == "snyk-code":
+        provenance_path = directory / "snyk-provenance.json"
+        if not provenance_path.is_file():
+            errors.append("Snyk run missing snyk-provenance.json")
+        else:
+            errors.extend(validate_snyk_provenance(provenance_path, require_ready=status == "PASS"))
+        configuration = manifest.get("configuration") or {}
+        if configuration.get("path") != "snyk-provenance.json":
+            errors.append("Snyk manifest must bind snyk-provenance.json as configuration")
+        elif provenance_path.is_file() and configuration.get("sha256") != sha256_file(provenance_path):
+            errors.append("Snyk configuration hash does not match provenance")
+        errors.extend(validate_snyk_artifacts(directory))
+        for scope_metadata in directory.rglob("source-scope.json"):
+            errors.extend(verify_source_scope(scope_metadata))
     if status == "PASS":
         exit_code = manifest.get("exit_code")
         accepted_exit_codes = {0, 1} if str(manifest.get("tool", "")).lower() in {"semgrep", "snyk-code", "snyk"} else {0}
@@ -359,7 +374,7 @@ def validate_run(directory: Path, schema_dir: Path = SCHEMAS) -> list[str]:
             scope_files = list(directory.rglob("source-scope.json"))
             if len(scope_files) != 1:
                 errors.append("PASS SAST run must contain exactly one source-scope.json")
-            else:
+            elif str(manifest.get("tool", "")).lower() != "snyk-code":
                 errors.extend(verify_source_scope(scope_files[0]))
         if manifest.get("method") == "dast":
             required_dast = ("zap-report.json", "coverage.json", "seed-boundary.json", "zap-history.json", "passive-scan.json", "active-scan.json", "zap-runtime.json")

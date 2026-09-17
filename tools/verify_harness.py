@@ -59,6 +59,16 @@ def main() -> int:
         or snapshot.get("rules") != 151
     ):
         errors.append("Semgrep frozen snapshot metadata is not release-frozen")
+    snyk = json.loads((ROOT / "configs" / "vendors" / "snyk.json").read_text(encoding="utf-8"))
+    if (
+        snyk.get("cli_version") != "1.1306.3"
+        or snyk.get("official_cli_version") != "1.1306.3"
+        or snyk.get("binary_sha256") != "6affd215ef52f0eebaddd34e946c64bc8cfb06223387d8e6164a10501910fa92"
+        or snyk.get("requires_absolute_binary") is not True
+        or snyk.get("requires_external_cache") is not True
+        or snyk.get("requires_written_consent") is not True
+    ):
+        errors.append("Snyk CLI provenance pins are not release-frozen")
     zap_vendor = json.loads((ROOT / "configs" / "vendors" / "zap.json").read_text(encoding="utf-8"))
     if zap_vendor.get("image_digest") != digest or zap_vendor.get("arm64_child_digest") != "sha256:05cbf4cab5d2fdaef55b0cd0b586f22d0ce4f75e0995f3cea2db23afbbdfd2f8":
         errors.append("ZAP image digests are not release-frozen")
@@ -123,6 +133,23 @@ def main() -> int:
         runner_text = (ROOT / "scripts" / "run" / runner).read_text(encoding="utf-8")
         if "validate_sarif.py" not in runner_text:
             errors.append(f"{runner} does not validate SARIF structurally")
+    snyk_runner = (ROOT / "scripts" / "run" / "snyk.sh").read_text(encoding="utf-8")
+    for marker in ("SNYK_BIN", "SNYK_CACHE_PATH", "SNYK_WRITTEN_CONSENT", "whoami --json", "snyk_provenance.py", "--config-path snyk-provenance.json"):
+        if marker not in snyk_runner:
+            errors.append(f"Snyk runner lacks provenance boundary: {marker}")
+    if "snyk config" in snyk_runner or "whoami --json >" not in snyk_runner or "2>/dev/null" not in snyk_runner:
+        errors.append("Snyk runner exposes raw identity/configuration output")
+    provenance_schema = ROOT / "schemas" / "snyk-provenance.schema.json"
+    if not provenance_schema.is_file():
+        errors.append("Snyk provenance schema is missing")
+    manifest_tool = (ROOT / "tools" / "run_manifest.py").read_text(encoding="utf-8")
+    if (
+        "validate_snyk_provenance" not in manifest_tool
+        or "validate_snyk_artifacts" not in manifest_tool
+        or "require_ready=status == \"PASS\"" not in manifest_tool
+        or "snyk-provenance.json" not in manifest_tool
+    ):
+        errors.append("run manifest does not enforce Snyk provenance binding")
     traffic = (ROOT / "tools" / "traffic.py").read_text(encoding="utf-8")
     if "inScopeOnly" not in traffic or "/JSON/reports/action/generate/" not in traffic:
         errors.append("ZAP API operations lack exact scope/report endpoints")

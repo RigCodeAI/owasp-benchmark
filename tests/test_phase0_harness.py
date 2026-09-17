@@ -15,8 +15,14 @@ sys.path.insert(0, str(TOOLS))
 from aggregate import aggregate  # noqa: E402
 from codeql_metadata import capture, public_value  # noqa: E402
 from freeze_semgrep import freeze, provenance, verify as verify_rules  # noqa: E402
-from run_manifest import create_manifest, validate_run  # noqa: E402
+from run_manifest import create_manifest, validate_run, write_checksums  # noqa: E402
 from source_scope import prepare, verify as verify_scope  # noqa: E402
+from snyk_provenance import (  # noqa: E402
+    create as create_snyk_provenance,
+    enrich_engine_version,
+    validate as validate_snyk_provenance,
+    validate_artifacts as validate_snyk_artifacts,
+)
 from zap_automation import make_boundary, validate_alert_canary, validate_coverage, validate_history, validate_plan  # noqa: E402
 from validate_sarif import SarifError, validate  # noqa: E402
 
@@ -269,6 +275,35 @@ class Phase0HarnessTests(unittest.TestCase):
             self.assertEqual(manifest_value["configuration"]["path"], "external:frozen-rules.yml")
             self.assertEqual(manifest_value["configuration"]["sha256"], rules_digest)
             self.assertNotIn("frozen-rules.yml", (artifacts / "SHA256SUMS").read_text(encoding="utf-8"))
+            snyk_provenance = artifacts / "snyk-provenance.json"
+            create_snyk_provenance(
+                snyk_provenance,
+                cli_version="1.1306.3",
+                binary_sha256="6affd215ef52f0eebaddd34e946c64bc8cfb06223387d8e6164a10501910fa92",
+                authenticated=True,
+                consent_confirmed=True,
+                cache_isolated=True,
+            )
+            create_manifest(
+                artifacts,
+                run_id="run-1",
+                tool="snyk-code",
+                method="sast",
+                benchmark_commit=SHA,
+                harness_commit=SHA,
+                command=["snyk code test <source-scope/tree> --sarif-file-output=raw.sarif"],
+                status="PASS",
+                exit_code=1,
+                started_at="2026-09-16T00:00:00Z",
+                tool_version="1.1306.3",
+                config={"path": "snyk-provenance.json", "sha256": hashlib.sha256(snyk_provenance.read_bytes()).hexdigest()},
+                source_scope=json.loads((scope / "source-scope.json").read_text()),
+            )
+            self.assertEqual(validate_run(artifacts), [])
+            snyk_value = json.loads(snyk_provenance.read_text(encoding="utf-8"))
+            snyk_value["authenticated"] = False
+            snyk_provenance.write_text(json.dumps(snyk_value), encoding="utf-8")
+            self.assertTrue(validate_run(artifacts))
             environment_value["architecture"] = "tampered"
             environment_path.write_text(json.dumps(environment_value), encoding="utf-8")
             self.assertTrue(validate_run(artifacts))
@@ -300,6 +335,307 @@ class Phase0HarnessTests(unittest.TestCase):
                 check=False,
             )
             self.assertNotEqual(verify.returncode, 0)
+
+    def test_snyk_provenance_is_sanitized_and_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            provenance = root / "snyk-provenance.json"
+            create_snyk_provenance(
+                provenance,
+                cli_version="1.1306.3",
+                binary_sha256="6affd215ef52f0eebaddd34e946c64bc8cfb06223387d8e6164a10501910fa92",
+                authenticated=True,
+                consent_confirmed=True,
+                cache_isolated=True,
+            )
+            self.assertEqual(validate_snyk_provenance(provenance), [])
+            value = json.loads(provenance.read_text(encoding="utf-8"))
+            value["authenticated"] = False
+            provenance.write_text(json.dumps(value), encoding="utf-8")
+            self.assertTrue(validate_snyk_provenance(provenance))
+            value["authenticated"] = True
+            value["binary_sha256"] = "0" * 64
+            provenance.write_text(json.dumps(value), encoding="utf-8")
+            self.assertTrue(validate_snyk_provenance(provenance))
+            value["binary_sha256"] = "6affd215ef52f0eebaddd34e946c64bc8cfb06223387d8e6164a10501910fa92"
+            value["cache_path"] = "/private/cache"
+            provenance.write_text(json.dumps(value), encoding="utf-8")
+            self.assertTrue(validate_snyk_provenance(provenance))
+            del value["cache_path"]
+            value["raw_identity"] = {"unexpected": "private-account-data"}
+            provenance.write_text(json.dumps(value), encoding="utf-8")
+            self.assertTrue(validate_snyk_provenance(provenance))
+
+    def test_snyk_provenance_only_retains_safe_sarif_engine_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            provenance = root / "snyk-provenance.json"
+            create_snyk_provenance(
+                provenance,
+                cli_version="1.1306.3",
+                binary_sha256="6affd215ef52f0eebaddd34e946c64bc8cfb06223387d8e6164a10501910fa92",
+                authenticated=True,
+                consent_confirmed=True,
+                cache_isolated=True,
+            )
+            sarif = root / "raw.sarif"
+            sarif.write_text(json.dumps({
+                "version": "2.1.0",
+                "runs": [{"tool": {"driver": {"name": "Snyk Code", "version": "engine-1.2.3"}}, "results": []}],
+            }), encoding="utf-8")
+            enrich_engine_version(provenance, sarif)
+            value = json.loads(provenance.read_text(encoding="utf-8"))
+            self.assertEqual(value["engine_version"], "engine-1.2.3")
+            self.assertEqual(value["engine_version_status"], "exposed")
+            sarif.write_text(json.dumps({
+                "version": "2.1.0",
+                "runs": [{"tool": {"driver": {"name": "Snyk Code", "version": "/private/engine"}}, "results": []}],
+            }), encoding="utf-8")
+            enrich_engine_version(provenance, sarif)
+            value = json.loads(provenance.read_text(encoding="utf-8"))
+            self.assertIsNone(value["engine_version"])
+            self.assertEqual(value["engine_version_status"], "not_exposed")
+
+    def test_snyk_failed_status_still_requires_bound_provenance_and_sanitized_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "run"
+            artifacts.mkdir()
+            provenance = artifacts / "snyk-provenance.json"
+            create_snyk_provenance(
+                provenance,
+                cli_version=None,
+                binary_sha256=None,
+                authenticated=False,
+                consent_confirmed=False,
+                cache_isolated=False,
+            )
+
+            def refresh_manifest():
+                create_manifest(
+                    artifacts,
+                    run_id="failed-1",
+                    tool="snyk-code",
+                    method="sast",
+                    benchmark_commit=SHA,
+                    harness_commit=SHA,
+                    command=["snyk code test <source-scope/tree> --sarif-file-output=raw.sarif"],
+                    status="FAILED_ENV",
+                    exit_code=1,
+                    started_at="2026-09-16T00:00:00Z",
+                    tool_version="unavailable",
+                    config={"path": "snyk-provenance.json", "sha256": hashlib.sha256(provenance.read_bytes()).hexdigest()},
+                )
+
+            refresh_manifest()
+            self.assertEqual(validate_run(artifacts), [])
+            provenance.unlink()
+            write_checksums(artifacts)
+            self.assertTrue(validate_run(artifacts))
+
+            create_snyk_provenance(
+                provenance,
+                cli_version=None,
+                binary_sha256=None,
+                authenticated=False,
+                consent_confirmed=False,
+                cache_isolated=False,
+            )
+            tampered = json.loads(provenance.read_text(encoding="utf-8"))
+            tampered["raw_identity"] = {"organization": "secret"}
+            provenance.write_text(json.dumps(tampered), encoding="utf-8")
+            refresh_manifest()  # refreshes artifact hashes, config hash, and SHA256SUMS
+            self.assertTrue(validate_run(artifacts))
+
+            provenance.write_text(json.dumps(create_snyk_provenance(
+                provenance,
+                cli_version=None,
+                binary_sha256=None,
+                authenticated=False,
+                consent_confirmed=False,
+                cache_isolated=False,
+            )), encoding="utf-8")
+            (artifacts / "stdout.log").write_text(
+                "snyk organization=secret /private/account/path\n", encoding="utf-8"
+            )
+            refresh_manifest()  # refreshes all hashes while retaining the leaked log
+            self.assertTrue(validate_run(artifacts))
+
+    def test_snyk_sarif_privacy_checks_private_keys_and_file_uris(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sarif = root / "raw.sarif"
+            safe = {
+                "version": "2.1.0",
+                "runs": [{
+                    "tool": {"driver": {"name": "Snyk Code"}},
+                    "results": [{
+                        "message": {"text": "safe"},
+                        "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}}}],
+                    }],
+                }],
+            }
+            sarif.write_text(json.dumps(safe) + "\n", encoding="utf-8")
+            self.assertEqual(validate_snyk_artifacts(root), [])
+            safe["runs"][0]["tool"]["driver"]["organization"] = "secret"
+            safe["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] = (
+                "file:///private/account/path"
+            )
+            sarif.write_text(json.dumps(safe) + "\n", encoding="utf-8")
+            self.assertTrue(validate_snyk_artifacts(root))
+
+    def test_snyk_query_secret_urls_are_rejected_but_benign_queries_are_safe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sensitive_urls = (
+                "https://scanner.invalid/report?token=secret",
+                "https://scanner.invalid/report?auth_token=secret",
+                "https://scanner.invalid/report?snyk_org=secret",
+                "https://scanner.invalid/report?TOKEN=SECRET",
+            )
+            for index, url in enumerate(sensitive_urls):
+                suffix = ".json" if index % 2 == 0 else ".log"
+                artifact = root / f"query-{index}{suffix}"
+                contents = json.dumps({"report_url": url}) + "\n" if suffix == ".json" else url + "\n"
+                artifact.write_text(contents, encoding="utf-8")
+                self.assertTrue(validate_snyk_artifacts(root), url)
+                artifact.unlink()
+            (root / "benign.json").write_text(
+                json.dumps({"report_url": "https://scanner.invalid/report?case_id=42&page=2"}) + "\n",
+                encoding="utf-8",
+            )
+            (root / "benign.log").write_text(
+                "report=https://scanner.invalid/report?status=complete&limit=10\n", encoding="utf-8"
+            )
+            self.assertEqual(validate_snyk_artifacts(root), [])
+
+    def test_snyk_plain_text_sensitive_assignments_are_rejected_after_refresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "run"
+            artifacts.mkdir()
+            provenance = artifacts / "snyk-provenance.json"
+            create_snyk_provenance(
+                provenance,
+                cli_version=None,
+                binary_sha256=None,
+                authenticated=False,
+                consent_confirmed=False,
+                cache_isolated=False,
+            )
+
+            def refresh(log_line):
+                (artifacts / "stdout.log").write_text(log_line + "\n", encoding="utf-8")
+                create_manifest(
+                    artifacts,
+                    run_id="text-1",
+                    tool="snyk-code",
+                    method="sast",
+                    benchmark_commit=SHA,
+                    harness_commit=SHA,
+                    command=["snyk code test <source-scope/tree> --sarif-file-output=raw.sarif"],
+                    status="FAILED_ENV",
+                    exit_code=1,
+                    started_at="2026-09-16T00:00:00Z",
+                    tool_version="unavailable",
+                    config={"path": "snyk-provenance.json", "sha256": hashlib.sha256(provenance.read_bytes()).hexdigest()},
+                )
+
+            for assignment in (
+                "token=secret",
+                "auth_token=secret",
+                "snyk_org=secret",
+                "TOKEN=SECRET",
+                "AUTH_TOKEN=SECRET",
+                "SNYK_ORG=SECRET",
+            ):
+                refresh(assignment)
+                self.assertTrue(validate_run(artifacts), assignment)
+            refresh("scan status=complete page=2")
+            self.assertEqual(validate_run(artifacts), [])
+
+    def test_snyk_source_scope_metadata_is_scanned_and_canonical(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "benchmark"
+            source.mkdir()
+            (source / "account.py").write_text("ACCOUNT = 'safe-relative-name'\n", encoding="utf-8")
+            artifacts = root / "run"
+            artifacts.mkdir()
+            scope = artifacts / "source-scope"
+            prepare(source, scope, source_commit=SHA)
+            provenance = artifacts / "snyk-provenance.json"
+            create_snyk_provenance(
+                provenance,
+                cli_version=None,
+                binary_sha256=None,
+                authenticated=False,
+                consent_confirmed=False,
+                cache_isolated=False,
+            )
+
+            def refresh_manifest():
+                create_manifest(
+                    artifacts,
+                    run_id="scope-1",
+                    tool="snyk-code",
+                    method="sast",
+                    benchmark_commit=SHA,
+                    harness_commit=SHA,
+                    command=["snyk code test <source-scope/tree> --sarif-file-output=raw.sarif"],
+                    status="FAILED_ENV",
+                    exit_code=1,
+                    started_at="2026-09-16T00:00:00Z",
+                    tool_version="unavailable",
+                    config={"path": "snyk-provenance.json", "sha256": hashlib.sha256(provenance.read_bytes()).hexdigest()},
+                    source_scope=json.loads((scope / "source-scope.json").read_text(encoding="utf-8")),
+                )
+
+            refresh_manifest()
+            self.assertEqual(validate_run(artifacts), [])
+            scope_metadata = scope / "source-scope.json"
+            tampered = json.loads(scope_metadata.read_text(encoding="utf-8"))
+            tampered["organization"] = "secret"
+            tampered["manifest_sha256"] = "0" * 64
+            scope_metadata.write_text(json.dumps(tampered) + "\n", encoding="utf-8")
+            refresh_manifest()  # refreshes manifest, artifact hashes, and SHA256SUMS
+            self.assertTrue(validate_run(artifacts))
+
+    def test_snyk_manifest_privacy_is_checked_after_refresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "run"
+            artifacts.mkdir()
+            provenance = artifacts / "snyk-provenance.json"
+            create_snyk_provenance(
+                provenance,
+                cli_version=None,
+                binary_sha256=None,
+                authenticated=False,
+                consent_confirmed=False,
+                cache_isolated=False,
+            )
+
+            def refresh_manifest(command):
+                create_manifest(
+                    artifacts,
+                    run_id="manifest-1",
+                    tool="snyk-code",
+                    method="sast",
+                    benchmark_commit=SHA,
+                    harness_commit=SHA,
+                    command=command,
+                    status="FAILED_ENV",
+                    exit_code=1,
+                    started_at="2026-09-16T00:00:00Z",
+                    tool_version="unavailable",
+                    config={"path": "snyk-provenance.json", "sha256": hashlib.sha256(provenance.read_bytes()).hexdigest()},
+                )
+
+            refresh_manifest(["snyk code test <source-scope/tree> --sarif-file-output=raw.sarif"])
+            self.assertEqual(validate_run(artifacts), [])
+            refresh_manifest(["snyk organization=secret"])
+            self.assertTrue(validate_run(artifacts))
 
     def test_zap_plan_and_history_require_single_seed_boundary(self):
         plan = Path(__file__).resolve().parents[1] / "configs" / "zap-automation.example.yaml"

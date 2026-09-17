@@ -3,6 +3,13 @@
   "name": "Snyk Code",
   "method": "sast",
   "enabled": true,
+  "official_cli_version": "1.1306.3",
+  "cli_version": "1.1306.3",
+  "binary_sha256": "6affd215ef52f0eebaddd34e946c64bc8cfb06223387d8e6164a10501910fa92",
+  "requires_absolute_binary": true,
+  "requires_external_cache": true,
+  "requires_written_consent": true,
+  "provenance": "snyk-provenance.json",
   "command_template": "snyk code test <target> --sarif-file-output=<artifact>",
   "requires_authentication": true
 }

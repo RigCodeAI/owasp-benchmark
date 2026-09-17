@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sanitized Snyk Code provenance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool",
+    "cli_version",
+    "binary_sha256",
+    "authenticated",
+    "consent_confirmed",
+    "captured_at",
+    "cache_isolated",
+    "scan",
+    "account_tier",
+    "account_tier_status",
+    "engine_version",
+    "engine_version_status"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "tool": {"const": "snyk-code"},
+    "cli_version": {"type": ["string", "null"], "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "binary_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "authenticated": {"type": "boolean"},
+    "consent_confirmed": {"type": "boolean"},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "cache_isolated": {"type": "boolean"},
+    "scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "source_scope", "output", "configuration", "exit_code_policy"],
+      "properties": {
+        "command": {"const": "snyk code test <source-scope/tree> --sarif-file-output=raw.sarif"},
+        "source_scope": {"const": "tree"},
+        "output": {"const": "raw.sarif"},
+        "configuration": {"const": "default"},
+        "exit_code_policy": {"const": "1_findings"}
+      }
+    },
+    "account_tier": {"type": "null"},
+    "account_tier_status": {"const": "not_exposed"},
+    "engine_version": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$"},
+    "engine_version_status": {"enum": ["exposed", "not_exposed"]}
+  }
+}

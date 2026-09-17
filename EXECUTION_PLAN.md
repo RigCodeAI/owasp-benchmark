@@ -203,11 +203,13 @@ During the canary, confirm the pinned Semgrep CLI's documented exit behavior. If
 
 ### Human authentication gate
 
-The current local CLI candidate is `1.1306.3`. Use a writable cache outside the target:
+The current local CLI candidate is `1.1306.3`, frozen by the vendor configuration and binary SHA256. The runner requires an absolute `SNYK_BIN`, a writable cache outside the repository and artifacts, and explicit written consent:
 
 ```sh
-SNYK_CACHE_PATH=/tmp/owasp-benchmark-snyk-cache snyk auth
-SNYK_CACHE_PATH=/tmp/owasp-benchmark-snyk-cache snyk whoami
+SNYK_BIN=/absolute/path/to/snyk-1.1306.3 \
+SNYK_CACHE_PATH=/tmp/owasp-benchmark-snyk-cache \
+SNYK_WRITTEN_CONSENT=confirmed \
+  ./scripts/run/snyk.sh benchmark /absolute/path/to/auth-check-run
 ```
 
 The user performs authentication. The agent records only the CLI version, scan time, account tier, and relevant policy/configuration—not credentials or private organization identifiers.
@@ -215,7 +217,9 @@ The user performs authentication. The agent records only the CLI version, scan t
 ### Canary and runs
 
 ```sh
+SNYK_BIN=/absolute/path/to/snyk-1.1306.3 \
 SNYK_CACHE_PATH=/tmp/owasp-benchmark-snyk-cache \
+SNYK_WRITTEN_CONSENT=confirmed \
   ./scripts/run/snyk.sh benchmark /absolute/path/to/run-1
 ```
 
@@ -224,7 +228,7 @@ Snyk exit code `1` means findings were reported and is accepted by the runner. O
 ### Acceptance gate
 
 - Snyk Code is enabled for the authenticated account.
-- The CLI version, account tier, configuration, timestamps, and any exposed engine version are retained.
+- The CLI version and binary hash, authenticated status, consent, cache isolation, timestamps, sanitized configuration facts, and any safely exposed engine version are retained in `snyk-provenance.json`; account tier remains explicitly not exposed.
 - All three SARIF files are parseable and independently scored.
 - Hosted-engine drift and finding-set instability are shown rather than hidden.
 - No source, token, cache, or account metadata is committed accidentally.
