@@ -4,5 +4,20 @@
   "method": "sast",
   "enabled": true,
   "command_template": "semgrep scan --config <pinned-rules> --sarif --output <artifact> <target>",
-  "requires_authentication": false
+  "requires_authentication": false,
+  "requires_frozen_rules": true,
+  "mutable_registry_references_rejected": true,
+  "resolved_snapshot": {
+    "publishable": false,
+    "sha256": "31c1dfa46e8ddd97f9ac98c607ddd77b20a2c3356d7ec987359961d47ec27035",
+    "rules": 151,
+    "source_url": "https://semgrep.dev/c/p/python",
+    "source_ref": "p/python",
+    "license": {"id": "Semgrep Rules License v1.0", "url": "https://semgrep.dev/legal/rules-license/"},
+    "redistribution": "prohibited",
+    "redistribution_allowed": false,
+    "cli_mode": "community",
+    "account_status": "unauthenticated",
+    "auth_status": "not_applicable"
+  }
 }

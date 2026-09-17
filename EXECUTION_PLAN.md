@@ -203,11 +203,13 @@ During the canary, confirm the pinned Semgrep CLI's documented exit behavior. If
 
 ### Human authentication gate
 
-The current local CLI candidate is `1.1306.3`. Use a writable cache outside the target:
+The current local CLI candidate is `1.1306.3`, frozen by the vendor configuration and binary SHA256. The runner requires an absolute `SNYK_BIN`, a writable cache outside the repository and artifacts, and explicit written consent:
 
 ```sh
-SNYK_CACHE_PATH=/tmp/owasp-benchmark-snyk-cache snyk auth
-SNYK_CACHE_PATH=/tmp/owasp-benchmark-snyk-cache snyk whoami
+SNYK_BIN=/absolute/path/to/snyk-1.1306.3 \
+SNYK_CACHE_PATH=/tmp/owasp-benchmark-snyk-cache \
+SNYK_WRITTEN_CONSENT=confirmed \
+  ./scripts/run/snyk.sh benchmark /absolute/path/to/auth-check-run
 ```
 
 The user performs authentication. The agent records only the CLI version, scan time, account tier, and relevant policy/configuration—not credentials or private organization identifiers.
@@ -215,7 +217,9 @@ The user performs authentication. The agent records only the CLI version, scan t
 ### Canary and runs
 
 ```sh
+SNYK_BIN=/absolute/path/to/snyk-1.1306.3 \
 SNYK_CACHE_PATH=/tmp/owasp-benchmark-snyk-cache \
+SNYK_WRITTEN_CONSENT=confirmed \
   ./scripts/run/snyk.sh benchmark /absolute/path/to/run-1
 ```
 
@@ -224,7 +228,7 @@ Snyk exit code `1` means findings were reported and is accepted by the runner. O
 ### Acceptance gate
 
 - Snyk Code is enabled for the authenticated account.
-- The CLI version, account tier, configuration, timestamps, and any exposed engine version are retained.
+- The CLI version and binary hash, authenticated status, consent, cache isolation, timestamps, sanitized configuration facts, and any safely exposed engine version are retained in `snyk-provenance.json`; account tier remains explicitly not exposed.
 - All three SARIF files are parseable and independently scored.
 - Hosted-engine drift and finding-set instability are shown rather than hidden.
 - No source, token, cache, or account metadata is committed accidentally.
@@ -235,14 +239,16 @@ Snyk exit code `1` means findings were reported and is accepted by the runner. O
 
 - Download a pinned official CodeQL bundle. Initial candidate: `2.27.0`.
 - Verify the release checksum before extraction.
-- Record `codeql version --format=json` and `codeql resolve qlpacks`.
+- Record `codeql version --format=json` and `codeql resolve packs`.
 - Use the bundle's pinned Python query pack and record the exact suite. The baseline suite is `python-security-extended.qls` unless the protocol freeze changes it before any scanner run.
 
 ### Canary and runs
 
 ```sh
 PATH=/absolute/path/to/codeql:$PATH \
-CODEQL_SUITE=codeql/python-queries:codeql-suites/python-security-extended.qls \
+CODEQL_BUNDLE_PATH=/absolute/path/to/codeql-bundle \
+CODEQL_QUERY_PACK_PATH=/absolute/path/to/codeql-bundle/qlpacks/codeql/python-queries/1.8.10 \
+CODEQL_SUITE=/absolute/path/to/codeql-bundle/qlpacks/codeql/python-queries/1.8.10/codeql-suites/python-security-extended.qls \
   ./scripts/run/codeql.sh benchmark /absolute/path/to/run-1
 ```
 

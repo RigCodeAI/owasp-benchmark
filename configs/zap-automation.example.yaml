@@ -1,5 +1,11 @@
-# Generate artifacts/benchmark-safe.har with tools/traffic.py first.
-# Keep this URL identical to the --base-url used for the HAR.
+# The plan itself does not seed traffic. The runner replays crawler XML once
+# through the proxy and records a seed/history boundary before this plan runs.
+# Keep this URL identical to the --base-url used by scripts/run/zap.sh.
+seed_traffic: external-proxy-replay
+image: ghcr.io/zaproxy/zaproxy:2.17.0
+# The coordinator must substitute the release's immutable digest here and pass
+# the same value as ZAP_IMAGE_DIGEST to the validator.
+imageDigest: sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef
 env:
   contexts:
     - name: benchmark
@@ -7,13 +13,6 @@ env:
         - http://benchmark:8000/benchmark
 
 jobs:
-  - type: import
-    parameters:
-      type: har
-      fileName: /zap/wrk/artifacts/benchmark-safe.har
-      sendRequests: true
-      maxMessages: 0
-
   - type: passiveScan-wait
 
   - type: activeScan

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "alerts": [
+    {
+      "alert": "Path Traversal",
+      "case_id": "BenchmarkTest00001",
+      "cwe": "CWE-22",
+      "url": "http://benchmark:8000/benchmark/BenchmarkTest00001"
+    },
+    {
+      "alert": "Cross Site Scripting",
+      "case_id": "BenchmarkTest00002",
+      "cwe": "CWE-79",
+      "url": "http://benchmark:8000/benchmark/BenchmarkTest00002"
+    }
+  ]
+}

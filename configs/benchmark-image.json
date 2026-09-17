@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "base_image": "python:3.12-slim",
+  "base_image_index_digest": "sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea",
+  "base_image_platform": "linux/arm64",
+  "base_image_platform_digest": "sha256:3949e4271b0a3ff82afac7306764c313dcc8edeeb89c0376a3c2ac6007c66b1d",
+  "base_image_version": "3.12.14-slim-trixie",
+  "runtime_user": "65532:65532",
+  "application_route": "http://benchmark:8000/benchmark/Index.html",
+  "testfiles_mount": "/app/testfiles"
+}

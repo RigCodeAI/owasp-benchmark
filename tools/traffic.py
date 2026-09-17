@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import json
+import re
 import ssl
 import time
 import urllib.error
@@ -14,7 +16,23 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from common import case_id
+KNOWN_UNUSUAL_HEADER_CASES = {
+    "BenchmarkTest00654": "header name is a URL and may be rejected by standards-compliant clients",
+    "BenchmarkTest00655": "header name is a URL and may be rejected by standards-compliant clients",
+    "BenchmarkTest00658": "header name contains a newline and may be rejected by standards-compliant clients",
+    "BenchmarkTest00659": "header name contains a newline and may be rejected by standards-compliant clients",
+    "BenchmarkTest00660": "header name contains a newline and may be rejected by standards-compliant clients",
+}
+ZAP_CASE_RE = re.compile(r"BenchmarkTest\d{5}")
+
+
+class ZapApiError(RuntimeError):
+    """Raised when the ZAP daemon returns an API or report-generation error."""
+
+
+def case_id(value: object) -> str | None:
+    match = re.search(r"BenchmarkTest(\d{1,5})", str(value), re.IGNORECASE)
+    return f"BenchmarkTest{int(match.group(1)):05d}" if match else None
 
 
 def parse_crawler(path: Path) -> list[dict]:
@@ -27,7 +45,7 @@ def parse_crawler(path: Path) -> list[dict]:
         request = {
             "case_id": identifier,
             "source_url": element.get("URL"),
-            "method": "GET" if element.findall("getparam") else "POST",
+            "method": "POST" if element.findall("formparam") else "GET",
             "query": {},
             "form": {},
             "headers": {},
@@ -92,35 +110,48 @@ def replay(
     opener = make_opener(proxy, insecure)
     results: list[dict] = []
     for case in cases:
-        url = target_url(case["source_url"], base_url, case["query"])
-        body = urllib.parse.urlencode(case["form"]).encode() if case["method"] == "POST" else None
-        headers = {str(key): str(value) for key, value in case["headers"].items()}
-        headers["User-Agent"] = "owasp-benchmark/1"
-        if case["cookies"]:
-            headers["Cookie"] = "; ".join(
-                f"{key}={urllib.parse.quote_plus(value).replace('+', '%20')}"
-                for key, value in case["cookies"].items()
-            )
-        if body is not None:
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
-        request = urllib.request.Request(url, data=body, headers=headers, method=case["method"])
+        url = None
         started = time.monotonic()
         status = None
         error = None
         exercised = False
         reached_target = False
+        construction_error = None
         try:
-            with opener.open(request, timeout=timeout) as response:
-                status = response.status
-                response.read(1024)
-                reached_target = True
-                exercised = 200 <= status < 400
+            try:
+                url = target_url(case["source_url"], base_url, case["query"])
+                body = urllib.parse.urlencode(case["form"]).encode() if case["method"] == "POST" else None
+                headers = {str(key): str(value) for key, value in case["headers"].items()}
+                headers["User-Agent"] = "owasp-benchmark/1"
+                if case["cookies"]:
+                    headers["Cookie"] = "; ".join(
+                        f"{key}={urllib.parse.quote_plus(value).replace('+', '%20')}"
+                        for key, value in case["cookies"].items()
+                    )
+                if body is not None:
+                    headers["Content-Type"] = "application/x-www-form-urlencoded"
+                request = urllib.request.Request(url, data=body, headers=headers, method=case["method"])
+            except (TypeError, ValueError, UnicodeError, KeyError) as exc:
+                construction_error = f"request construction: {exc}"
+            if construction_error is None:
+                with opener.open(request, timeout=timeout) as response:
+                    status = response.status
+                    response.read(1024)
+                    reached_target = True
+                    exercised = 200 <= status < 400
         except urllib.error.HTTPError as exc:
             status = exc.code
             reached_target = True
             error = f"HTTP {exc.code}"
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        # urllib may defer header/cookie validation until the request is sent;
+        # keep those malformed cases as explicit not_run records instead of
+        # aborting the 1,230-case replay.
+        except (urllib.error.URLError, TimeoutError, OSError, TypeError, ValueError, UnicodeError, KeyError) as exc:
             error = str(exc)
+        if construction_error is not None:
+            error = construction_error
+        predeclared_reason = KNOWN_UNUSUAL_HEADER_CASES.get(case["case_id"])
+        not_run_reason = None if exercised else (error or "request did not receive a successful response")
         results.append(
             {
                 "case_id": case["case_id"],
@@ -133,6 +164,8 @@ def replay(
                 "reached_target": reached_target,
                 "exercised": exercised,
                 "error": error,
+                "predeclared_reason": predeclared_reason,
+                "not_run_reason": not_run_reason,
                 "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
             }
         )
@@ -214,6 +247,177 @@ def build_har(cases: list[dict], base_url: str, allow_remote: bool = False) -> d
     }
 
 
+def zap_api(base: str, endpoint: str, **params):
+    query = urllib.parse.urlencode({key: value for key, value in params.items() if value is not None})
+    url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}" + (("?" + query) if query else "")
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 - private compose daemon only
+            payload = response.read()
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+        raise ZapApiError(f"ZAP API request failed: {endpoint}: {exc}") from exc
+    try:
+        value = json.loads(payload)
+    except json.JSONDecodeError:
+        return payload
+    if isinstance(value, dict):
+        code = value.get("code")
+        if "error" in value or (code is not None and code not in (0, "0", "OK", "ok")):
+            raise ZapApiError(f"ZAP API error from {endpoint}: {value}")
+    return value
+
+
+def _history_message_url(message: dict) -> str:
+    if isinstance(message.get("url"), str):
+        return message["url"]
+    lines = str(message.get("requestHeader", "")).splitlines()
+    match = re.match(r"\S+\s+(\S+)", lines[0]) if lines else None
+    return match.group(1) if match else ""
+
+
+def zap_history(base: str, coverage_path: Path, output: Path) -> dict:
+    coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+    expected = {item["case_id"]: item["url"] for item in coverage["cases"] if item.get("exercised")}
+    not_run = {
+        item["case_id"]: item.get("not_run_reason")
+        for item in coverage["cases"]
+        if not item.get("exercised")
+    }
+    response = zap_api(base, "/JSON/core/view/messages/", baseurl="http://benchmark:8000/benchmark", count=2000)
+    messages = response.get("messages", []) if isinstance(response, dict) else []
+    counts = {identifier: 0 for identifier in expected}
+    matched = []
+    for message in messages:
+        url = _history_message_url(message)
+        for identifier in ZAP_CASE_RE.findall(url):
+            if identifier in counts and url == expected[identifier]:
+                counts[identifier] += 1
+                matched.append({"case_id": identifier, "url": url, "message_id": message.get("id")})
+    matched_ids = {item["case_id"] for item in matched}
+    missing = sorted(set(expected) - matched_ids)
+    missing_not_run = sorted(not_run)
+    evidence = {
+        "schema_version": 1,
+        "seed_request_count": len(matched),
+        "unique_case_ids": sum(count == 1 for count in counts.values()),
+        "duplicate_seed_requests": sum(max(count - 1, 0) for count in counts.values()),
+        "missing_case_ids": missing + missing_not_run,
+        "missing_exercised_case_ids": missing,
+        "not_run_case_ids": missing_not_run,
+        "not_run_reasons": not_run,
+        "seed_boundary_recorded": True,
+        "matched": matched,
+    }
+    write_json(output, evidence)
+    return evidence
+
+
+def zap_passive(base: str, output: Path, timeout: float) -> dict:
+    deadline = time.monotonic() + timeout
+    remaining = -1
+    while time.monotonic() < deadline:
+        response = zap_api(base, "/JSON/pscan/view/recordsToScan/")
+        remaining = int(response.get("recordsToScan", -1)) if isinstance(response, dict) else -1
+        if remaining == 0:
+            break
+        time.sleep(1)
+    evidence = {"schema_version": 1, "records_to_scan": remaining, "completed": remaining == 0}
+    write_json(output, evidence)
+    return evidence
+
+
+def zap_context(base: str, target: str) -> str:
+    created = zap_api(base, "/JSON/context/action/newContext/", contextName="benchmark")
+    context_id = created.get("contextId") if isinstance(created, dict) else None
+    if not context_id:
+        raise ZapApiError(f"ZAP context creation returned no contextId: {created!r}")
+    pattern = re.escape(target.rstrip("/")) + ".*"
+    zap_api(base, "/JSON/context/action/includeInContext/", contextName="benchmark", regex=pattern)
+    return str(context_id)
+
+
+def zap_active(base: str, target: str, output: Path, timeout: float) -> dict:
+    context_id = zap_context(base, target)
+    started = zap_api(
+        base,
+        "/JSON/ascan/action/scan/",
+        url=target,
+        recurse="true",
+        inScopeOnly="true",
+        contextId=context_id,
+    )
+    scan_id = started.get("scan", "") if isinstance(started, dict) else ""
+    if not scan_id:
+        raise ZapApiError(f"ZAP active scan returned no scan ID: {started!r}")
+    status = "0"
+    deadline = time.monotonic() + timeout
+    while scan_id and time.monotonic() < deadline:
+        response = zap_api(base, "/JSON/ascan/view/status/", scanId=scan_id)
+        status = str(response.get("status", "0")) if isinstance(response, dict) else "0"
+        if status == "100":
+            break
+        time.sleep(1)
+    evidence = {
+        "schema_version": 1,
+        "scan_id": scan_id,
+        "status": status,
+        "completed": status == "100",
+        "context_id": context_id,
+        "scope_url": target,
+        "in_scope_only": True,
+    }
+    write_json(output, evidence)
+    return evidence
+
+
+def zap_reports(base: str, target: str, output_dir: Path) -> None:
+    for template, filename in (("traditional-json-plus", "zap-report.json"), ("sarif-json", "raw.sarif")):
+        response = zap_api(
+            base,
+            "/JSON/reports/action/generate/",
+            title="OWASP BenchmarkPython ZAP report",
+            template=template,
+            theme="original",
+            contexts="benchmark",
+            sites=target,
+            reportDir="/zap/wrk/artifacts",
+            reportFileName=filename,
+            display="false",
+        )
+        if isinstance(response, dict) and ("error" in response or response.get("code") not in (None, 0, "0", "OK", "ok")):
+            raise ZapApiError(f"ZAP report generation failed for {template}: {response}")
+        report = output_dir / filename
+        if not report.is_file() or report.stat().st_size == 0:
+            raise ZapApiError(f"ZAP report API did not create {filename}")
+
+
+def zap_metadata(
+    base: str,
+    output_dir: Path,
+    image: str,
+    digest: str,
+    platform_digest: str,
+    plan: Path,
+    project: str,
+    target: str,
+) -> None:
+    addons = zap_api(base, "/JSON/core/view/addons/")
+    write_json(output_dir / "zap-runtime.json", {
+        "schema_version": 1,
+        "image": image,
+        "image_digest": digest,
+        "platform_digest": platform_digest,
+        "compose_project": project,
+        "target_url": target,
+        "automation_plan": plan.name,
+        "automation_plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
+        "version": zap_api(base, "/JSON/core/view/version/"),
+        "addons": addons,
+        "addons_sha256": hashlib.sha256(
+            json.dumps(addons, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    })
+
+
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -238,16 +442,61 @@ def main() -> int:
     run.add_argument("--insecure", action="store_true")
     run.add_argument("--allow-remote", action="store_true", help="allow a non-loopback benchmark host")
     run.add_argument("--coverage-output", type=Path, required=True)
+    zh = subparsers.add_parser("zap-history")
+    zh.add_argument("--base", required=True)
+    zh.add_argument("--coverage", type=Path, required=True)
+    zh.add_argument("--output", type=Path, required=True)
+    zp = subparsers.add_parser("zap-passive")
+    zp.add_argument("--base", required=True)
+    zp.add_argument("--output", type=Path, required=True)
+    zp.add_argument("--timeout", type=float, default=900)
+    za = subparsers.add_parser("zap-active")
+    za.add_argument("--base", required=True)
+    za.add_argument("--target", required=True)
+    za.add_argument("--output", type=Path, required=True)
+    za.add_argument("--timeout", type=float, default=1800)
+    zr = subparsers.add_parser("zap-reports")
+    zr.add_argument("--base", required=True)
+    zr.add_argument("--target", required=True)
+    zr.add_argument("--output-dir", type=Path, required=True)
+    zm = subparsers.add_parser("zap-metadata")
+    zm.add_argument("--base", required=True)
+    zm.add_argument("--output-dir", type=Path, required=True)
+    zm.add_argument("--image", required=True)
+    zm.add_argument("--digest", required=True)
+    zm.add_argument("--platform-digest", required=True)
+    zm.add_argument("--plan", type=Path, required=True)
+    zm.add_argument("--project", required=True)
+    zm.add_argument("--target", required=True)
     args = parser.parse_args()
     cases = parse_crawler(args.crawler)
     if args.command == "manifest":
         write_json(args.output, {"schema_version": 1, "total": len(cases), "cases": cases})
     elif args.command == "har":
         write_json(args.output, build_har(cases, args.base_url, args.allow_remote))
-    else:
+    elif args.command == "replay":
         write_json(
             args.coverage_output,
             replay(cases, args.base_url, args.proxy, args.timeout, args.insecure, args.allow_remote),
+        )
+    elif args.command == "zap-history":
+        zap_history(args.base, args.coverage, args.output)
+    elif args.command == "zap-passive":
+        zap_passive(args.base, args.output, args.timeout)
+    elif args.command == "zap-active":
+        zap_active(args.base, args.target, args.output, args.timeout)
+    elif args.command == "zap-reports":
+        zap_reports(args.base, args.target, args.output_dir)
+    elif args.command == "zap-metadata":
+        zap_metadata(
+            args.base,
+            args.output_dir,
+            args.image,
+            args.digest,
+            args.platform_digest,
+            args.plan,
+            args.project,
+            args.target,
         )
     return 0
 

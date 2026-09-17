@@ -17,5 +17,26 @@ jobs:
           python-version: "3.12"
       - name: Unit tests
         run: python3 -m unittest discover -s tests -v
+      - name: Phase 0 harness checks
+        run: python3 tools/verify_harness.py
+      - name: Python syntax
+        run: python3 -m compileall -q tools tests
+      - name: Shell syntax
+        run: find scripts -name '*.sh' -print0 | xargs -0 -n1 sh -n
       - name: Verify pinned BenchmarkPython artifacts
         run: ./scripts/fetch-benchmark.sh
+
+  phase0-docker:
+    needs: harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Fetch pinned BenchmarkPython checkout
+        run: ./scripts/fetch-benchmark.sh
+      - name: Verify pinned ZAP topology and benchmark health
+        run: ./scripts/verify-zap-integration.sh

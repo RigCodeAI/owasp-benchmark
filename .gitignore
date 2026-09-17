@@ -5,3 +5,16 @@ __pycache__/
 .work/
 benchmark/
 artifacts/private/
+# Scanner state is deliberately kept outside publishable run artifacts.
+**/codeql-db/
+**/codeql-state-*/
+**/.codeql/
+**/.semgrep/
+**/.snyk/
+**/zap-session/
+**/zap-work/
+**/*.sqlite
+**/*.db
+**/source-scope/
+**/venv/
+**/.tox/
