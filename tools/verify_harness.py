@@ -134,7 +134,11 @@ def main() -> int:
         if "validate_sarif.py" not in runner_text:
             errors.append(f"{runner} does not validate SARIF structurally")
     snyk_runner = (ROOT / "scripts" / "run" / "snyk.sh").read_text(encoding="utf-8")
-    for marker in ("SNYK_BIN", "SNYK_CACHE_PATH", "SNYK_WRITTEN_CONSENT", "whoami --json", "snyk_provenance.py", "--config-path snyk-provenance.json"):
+    for marker in (
+        "SNYK_BIN", "SNYK_CACHE_PATH", "SNYK_WRITTEN_CONSENT", "whoami --json",
+        "snyk_provenance.py", "sanitize_snyk_output.py", "snyk-sanitization.json",
+        "--config-path snyk-provenance.json",
+    ):
         if marker not in snyk_runner:
             errors.append(f"Snyk runner lacks provenance boundary: {marker}")
     if "snyk config" in snyk_runner or "whoami --json >" not in snyk_runner or "2>/dev/null" not in snyk_runner:
@@ -142,6 +146,8 @@ def main() -> int:
     provenance_schema = ROOT / "schemas" / "snyk-provenance.schema.json"
     if not provenance_schema.is_file():
         errors.append("Snyk provenance schema is missing")
+    if not (ROOT / "tools" / "sanitize_snyk_output.py").is_file():
+        errors.append("Snyk output sanitizer is missing")
     manifest_tool = (ROOT / "tools" / "run_manifest.py").read_text(encoding="utf-8")
     if (
         "validate_snyk_provenance" not in manifest_tool

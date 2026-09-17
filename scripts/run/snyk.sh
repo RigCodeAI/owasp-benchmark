@@ -22,6 +22,9 @@ expected_sha256=6affd215ef52f0eebaddd34e946c64bc8cfb06223387d8e6164a10501910fa92
 status=FAILED_ENV
 exit_code=127
 identity_tmp=
+stdout_tmp=
+stderr_tmp=
+sanitize_error_tmp=
 provenance="$artifacts/snyk-provenance.json"
 printf '%s\n' "unavailable" >"$artifacts/version.txt"
 printf '%s\n' "snyk code test <source-scope/tree> --sarif-file-output=raw.sarif" >"$artifacts/command.txt"
@@ -33,9 +36,54 @@ cleanup_sensitive() {
   if [ -n "$identity_tmp" ]; then
     rm -f "$identity_tmp"
   fi
+  if [ -n "$stdout_tmp" ]; then
+    rm -f "$stdout_tmp"
+  fi
+  if [ -n "$stderr_tmp" ]; then
+    rm -f "$stderr_tmp"
+  fi
+  if [ -n "$sanitize_error_tmp" ]; then
+    rm -f "$sanitize_error_tmp"
+  fi
 }
 trap cleanup_sensitive EXIT INT TERM
+sanitize_outputs() {
+  if [ -z "$stdout_tmp" ] && [ -z "$stderr_tmp" ]; then
+    return 0
+  fi
+  if [ -z "$stdout_tmp" ] || [ -z "$stderr_tmp" ]; then
+    rm -f "$artifacts/stdout.log" "$artifacts/stderr.log"
+    printf '%s\n' "Snyk output sanitization failed" >"$artifacts/stderr.log"
+    return 1
+  fi
+  sanitize_error_tmp=$(mktemp "${TMPDIR:-/tmp}/snyk-sanitize-error.XXXXXX") || return 1
+  chmod 600 "$sanitize_error_tmp"
+  if ! python3 "$repo_root/tools/sanitize_snyk_output.py" \
+    --stdout-input "$stdout_tmp" --stderr-input "$stderr_tmp" \
+    --stdout-output "$artifacts/stdout.log" --stderr-output "$artifacts/stderr.log" \
+    --metadata "$artifacts/snyk-sanitization.json" \
+    --source-tree "$scope_real/tree" --source-scope "$scope_real" \
+    --artifact-dir "$artifacts" --repo-root "$repo_root" \
+    --benchmark-root "$target" --cache-dir "$cache_real" \
+    > /dev/null 2>"$sanitize_error_tmp"; then
+    rm -f "$artifacts/stdout.log" "$artifacts/stderr.log" "$artifacts/snyk-sanitization.json"
+    printf '%s\n' "Snyk output sanitization failed" >"$artifacts/stderr.log"
+    rm -f "$sanitize_error_tmp"
+    sanitize_error_tmp=
+    return 1
+  fi
+  rm -f "$sanitize_error_tmp"
+  sanitize_error_tmp=
+  rm -f "$stdout_tmp" "$stderr_tmp"
+  stdout_tmp=
+  stderr_tmp=
+  return 0
+}
 finish() {
+  sanitization_failed=0
+  if ! sanitize_outputs; then
+    sanitization_failed=1
+  fi
   config_args=
   provenance_sha256=
   provenance_binding_failed=0
@@ -55,6 +103,10 @@ finish() {
     status=FAILED_ENV
     [ "$exit_code" -eq 0 ] && exit_code=1
   fi
+  if [ "$sanitization_failed" -ne 0 ]; then
+    status=INVALID_OUTPUT
+    exit_code=1
+  fi
   python3 "$repo_root/tools/run_manifest.py" create --artifact-dir "$artifacts" --run-id "$run_id" \
     --tool snyk-code --method sast --benchmark-commit "${benchmark_commit:-0000000000000000000000000000000000000000}" \
     --harness-commit "${harness_commit:-0000000000000000000000000000000000000000}" \
@@ -62,7 +114,7 @@ finish() {
     --command "snyk code test <source-scope/tree> --sarif-file-output=raw.sarif" \
     --tool-version-file "$artifacts/version.txt" --source-scope "$scope_dir/source-scope.json" $config_args
   manifest_status=$?
-  if [ "$provenance_binding_failed" -ne 0 ] || [ "$manifest_status" -ne 0 ]; then
+  if [ "$provenance_binding_failed" -ne 0 ] || [ "$sanitization_failed" -ne 0 ] || [ "$manifest_status" -ne 0 ]; then
     return 1
   fi
   return 0
@@ -123,6 +175,7 @@ python3 "$repo_root/tools/snyk_provenance.py" create --output "$provenance" \
   --consent-confirmed true --cache-isolated true >/dev/null 2>"$artifacts/provenance.stderr.log" || fail_env "Unable to write Snyk provenance"
 python3 "$repo_root/tools/source_scope.py" prepare --source "$target" --output "$scope_dir" --source-commit "$benchmark_commit" \
   >"$artifacts/source-scope.stdout.log" 2>"$artifacts/source-scope.stderr.log" || { exit_code=1; finish; exit 1; }
+scope_real=$(CDPATH= cd -P -- "$scope_dir" 2>/dev/null && pwd -P) || { exit_code=1; finish; exit 1; }
 identity_tmp=$(mktemp "${TMPDIR:-/tmp}/snyk-whoami.XXXXXX") || fail_env "Unable to create private Snyk authentication check"
 chmod 600 "$identity_tmp"
 "$snyk_bin" whoami --json >"$identity_tmp" 2>/dev/null
@@ -143,8 +196,11 @@ python3 "$repo_root/tools/snyk_provenance.py" create --output "$provenance" \
   --cli-version "$version_value" --binary-sha256 "$binary_sha256" --authenticated true \
   --consent-confirmed true --cache-isolated true >/dev/null 2>"$artifacts/provenance.stderr.log" || fail_env "Unable to write Snyk provenance"
 printf '%s\n' "snyk code test <source-scope/tree> --sarif-file-output=raw.sarif" >"$artifacts/command.txt"
+stdout_tmp=$(mktemp "${TMPDIR:-/tmp}/snyk-stdout.XXXXXX") || fail_env "Unable to create private Snyk output capture"
+stderr_tmp=$(mktemp "${TMPDIR:-/tmp}/snyk-stderr.XXXXXX") || fail_env "Unable to create private Snyk output capture"
+chmod 600 "$stdout_tmp" "$stderr_tmp"
 "$snyk_bin" code test "$scope_dir/tree" --sarif-file-output="$artifacts/raw.sarif" \
-  >"$artifacts/stdout.log" 2>"$artifacts/stderr.log"
+  >"$stdout_tmp" 2>"$stderr_tmp"
 scan_status=$?
 exit_code=$scan_status
 if [ ! -s "$artifacts/raw.sarif" ] || ! python3 "$repo_root/tools/validate_sarif.py" --input "$artifacts/raw.sarif" \
@@ -159,4 +215,6 @@ if [ "$scan_status" -ne 0 ] && [ "$scan_status" -ne 1 ]; then status=FAILED_SCAN
 if ! python3 "$repo_root/tools/normalize_sarif.py" --input "$artifacts/raw.sarif" --output "$artifacts/normalized.jsonl" --diagnostics "$artifacts/normalization.json"; then status=INVALID_OUTPUT; finish; exit 1; fi
 if ! python3 "$repo_root/tools/score.py" --expected "$target/expectedresults-0.1.csv" --findings "$artifacts/normalized.jsonl" --output "$artifacts/score.json"; then status=INVALID_OUTPUT; finish; exit 1; fi
 status=PASS
-finish
+finish_status=0
+finish || finish_status=$?
+exit "$finish_status"

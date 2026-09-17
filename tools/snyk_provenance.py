@@ -26,11 +26,11 @@ PRIVATE_TEXT_RE = re.compile(
     r"(?ix)"
     r"(?:\bfile:///[^\s\"']+)"
     r"|(?:^|[\s\"'=])/(?:private|Users|home|tmp|var)/"
-    r"|(?:^|[\s\"'=(:])/(?!/)[^\s\"']+"
+    r"|(?:^|[\s\"'=(:])/(?!/)[A-Za-z0-9._~-][^\s\"']*"
     r"|(?:^|[\s\"'=])[A-Za-z]:[\\/]"
 )
 TEXT_ASSIGNMENT_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9_.-]{0,127})\s*[:=]\s*[^\s,;]+"
+    r"(?i)(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9_. -]{0,127}?)\s*[:=]\s*[^\s,;]+"
 )
 TEXT_URL_RE = re.compile(r"(?i)https?://[^\s\"'<>]+")
 SENSITIVE_QUERY_PARTS = (

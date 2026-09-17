@@ -16,6 +16,7 @@ from aggregate import aggregate  # noqa: E402
 from codeql_metadata import capture, public_value  # noqa: E402
 from freeze_semgrep import freeze, provenance, verify as verify_rules  # noqa: E402
 from run_manifest import create_manifest, validate_run, write_checksums  # noqa: E402
+from sanitize_snyk_output import sanitize_files  # noqa: E402
 from source_scope import prepare, verify as verify_scope  # noqa: E402
 from snyk_provenance import (  # noqa: E402
     create as create_snyk_provenance,
@@ -483,6 +484,155 @@ class Phase0HarnessTests(unittest.TestCase):
             )
             sarif.write_text(json.dumps(safe) + "\n", encoding="utf-8")
             self.assertTrue(validate_snyk_artifacts(root))
+
+    def test_snyk_markdown_punctuation_is_not_an_absolute_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "raw.sarif").write_text(json.dumps({
+                "version": "2.1.0",
+                "runs": [{
+                    "tool": {"driver": {
+                        "name": "Snyk Code",
+                        "rules": [{"help": {"markdown": "Example list, /, <tag>, safe prose"}}],
+                    }},
+                    "results": [],
+                }],
+            }) + "\n", encoding="utf-8")
+            self.assertEqual(validate_snyk_artifacts(root), [])
+
+    def test_snyk_output_sanitizer_replaces_paths_and_redacts_sensitive_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inputs = root / "private-inputs"
+            artifacts = root / "artifacts"
+            inputs.mkdir()
+            artifacts.mkdir()
+            stdout_input = inputs / "stdout.in"
+            stderr_input = inputs / "stderr.in"
+            stdout_output = artifacts / "stdout.log"
+            stderr_output = artifacts / "stderr.log"
+            metadata = artifacts / "snyk-sanitization.json"
+            stdout_input.write_text(
+                "finding case=BenchmarkTest00001\n"
+                "source=/work/scope/tree/app.py artifact=/work/artifacts/raw.sarif\n"
+                "token=synthetic-secret\n"
+                "report=https://scanner.invalid/report?auth_token=synthetic-secret\n",
+                encoding="utf-8",
+            )
+            stderr_input.write_text(
+                "cache=/work/cache\nrepo=/work/repo\n", encoding="utf-8"
+            )
+            value = sanitize_files(
+                {"stdout": (stdout_input, stdout_output), "stderr": (stderr_input, stderr_output)},
+                metadata,
+                [
+                    ("/work/scope/tree", "<SOURCE_SCOPE_TREE>"),
+                    ("/work/artifacts", "<ARTIFACT_DIR>"),
+                    ("/work/repo", "<HARNESS_ROOT>"),
+                    ("/work/cache", "<SNYK_CACHE>"),
+                ],
+            )
+            sanitized = stdout_output.read_text(encoding="utf-8") + stderr_output.read_text(encoding="utf-8")
+            self.assertIn("finding case=BenchmarkTest00001", sanitized)
+            self.assertIn("<SOURCE_SCOPE_TREE>", sanitized)
+            self.assertIn("<ARTIFACT_DIR>", sanitized)
+            self.assertIn("<HARNESS_ROOT>", sanitized)
+            self.assertIn("<SNYK_CACHE>", sanitized)
+            self.assertNotIn("synthetic-secret", sanitized)
+            self.assertNotIn("token=", sanitized)
+            self.assertNotIn("auth_token=", sanitized)
+            self.assertEqual(value["totals"]["sensitive_assignment_lines"], 1)
+            self.assertEqual(value["totals"]["sensitive_url_lines"], 1)
+            self.assertEqual(value["totals"]["local_replacements"], 4)
+            self.assertEqual(validate_snyk_artifacts(artifacts), [])
+
+    def test_snyk_runner_fails_closed_when_sanitizer_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            benchmark = root / "benchmark"
+            benchmark.mkdir()
+            (benchmark / "app.py").write_text("print('fixture')\n", encoding="utf-8")
+            (benchmark / "expectedresults-0.1.csv").write_text(
+                "BenchmarkTest00001,path,false,22\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "-C", str(benchmark), "init", "-q"], check=True)
+            subprocess.run(["git", "-C", str(benchmark), "config", "user.name", "Phase 0 Fixture"], check=True)
+            subprocess.run(["git", "-C", str(benchmark), "config", "user.email", "phase0@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(benchmark), "add", "app.py", "expectedresults-0.1.csv"], check=True)
+            subprocess.run(["git", "-C", str(benchmark), "commit", "-qm", "fixture"], check=True)
+
+            fake_snyk = root / "fake-snyk"
+            fake_snyk.write_text(
+                "#!/bin/sh\n"
+                "case \"$1\" in\n"
+                "  --version) printf '%s\\n' '1.1306.3'; exit 0 ;;\n"
+                "  whoami) printf '%s\\n' '{}'; exit 0 ;;\n"
+                "  code)\n"
+                "    output=\n"
+                "    for arg in \"$@\"; do case \"$arg\" in --sarif-file-output=*) output=${arg#*=} ;; esac; done\n"
+                "    printf '%s\\n' '{\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"fixture\"}},\"results\":[]}]}' >\"$output\"\n"
+                "    printf '%s\\n' 'finding case=BenchmarkTest00001'\n"
+                "    exit 0 ;;\n"
+                "esac\n"
+                "exit 2\n",
+                encoding="utf-8",
+            )
+            fake_snyk.chmod(0o700)
+            fake_hash = hashlib.sha256(fake_snyk.read_bytes()).hexdigest()
+            failing_sanitizer = root / "failing-sanitizer.py"
+            failing_sanitizer.write_text("raise SystemExit(17)\n", encoding="utf-8")
+            runner = root / "snyk.sh"
+            runner_text = (TOOLS.parent / "scripts" / "run" / "snyk.sh").read_text(encoding="utf-8")
+            runner_text = runner_text.replace(
+                'repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)',
+                f'repo_root="{TOOLS.parent}"',
+            )
+            runner_text = runner_text.replace(
+                "expected_sha256=6affd215ef52f0eebaddd34e946c64bc8cfb06223387d8e6164a10501910fa92",
+                f"expected_sha256={fake_hash}",
+            )
+            runner_text = runner_text.replace(
+                'python3 "$repo_root/tools/sanitize_snyk_output.py"',
+                f'python3 "{failing_sanitizer}"',
+            )
+            runner.write_text(runner_text, encoding="utf-8")
+            runner.chmod(0o700)
+            artifacts = root / "artifacts"
+            cache = root / "cache"
+            private_tmp = root / "private-tmp"
+            cache.mkdir()
+            private_tmp.mkdir()
+            environment = os.environ.copy()
+            environment.update({
+                "SNYK_BIN": str(fake_snyk),
+                "SNYK_CACHE_PATH": str(cache),
+                "SNYK_WRITTEN_CONSENT": "confirmed",
+                "TMPDIR": str(private_tmp),
+            })
+            result = subprocess.run(
+                [str(runner), str(benchmark), str(artifacts)],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            manifest = json.loads((artifacts / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                manifest["status"],
+                "INVALID_OUTPUT",
+                (artifacts / "stderr.log").read_text(encoding="utf-8") + (artifacts / "version.txt").read_text(encoding="utf-8"),
+            )
+            self.assertFalse((artifacts / "stdout.log").exists())
+            self.assertFalse((artifacts / "snyk-sanitization.json").exists())
+            self.assertFalse(any(private_tmp.iterdir()))
+            verify = subprocess.run(
+                [sys.executable, str(TOOLS / "run_manifest.py"), "verify", "--artifact-dir", str(artifacts)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(verify.returncode, 0, verify.stderr)
 
     def test_snyk_query_secret_urls_are_rejected_but_benign_queries_are_safe(self):
         with tempfile.TemporaryDirectory() as directory:

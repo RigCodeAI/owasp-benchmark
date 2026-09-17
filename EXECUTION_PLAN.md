@@ -225,6 +225,8 @@ SNYK_WRITTEN_CONSENT=confirmed \
 
 Snyk exit code `1` means findings were reported and is accepted by the runner. Other nonzero codes invalidate the run.
 
+The runner captures scanner stdout and stderr outside the artifact directory with restrictive permissions, replaces known local execution paths with stable placeholders, removes whole lines containing sensitive identity assignments or URL query credentials, and retains only sanitized logs plus deterministic count-only redaction metadata. Raw capture files are deleted on every exit path.
+
 ### Acceptance gate
 
 - Snyk Code is enabled for the authenticated account.
